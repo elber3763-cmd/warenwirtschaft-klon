@@ -321,7 +321,7 @@
 <script>
 const API = 'https://warenwirtschaft-klon-api.elber3763.workers.dev/api';
 let userRolle = 'user', activeView = 'dashboard', kritischerFilterAktiv = false;
-let lieferantenCache = [], lagerorteCache = [], artikelCache = [], bestellvorschlagCache = [], mhdCache = [];
+let lieferantenCache = [], lagerorteCache = [], artikelCache = [], bestellvorschlagCache = [];
 
 async function apiCall(url, options = {}) {
     const token = localStorage.getItem('token');
@@ -378,7 +378,7 @@ function switchView(view) {
     if (view === 'dashboard') loadDashboard();
     else if (view === 'artikel') { zeigeArtikelTabelle(); }
     else if (view === 'buchungen') loadBuchungen();
-    else if (view === 'inventur') loadInventurArtikel();
+    else if (view === 'inventur') { populateSelect('inventurArtikelId', artikelCache, 'name', 'id'); }
     else if (view === 'analyse') loadAnalyse('renner');
     else if (view === 'lieferanten') loadLieferantenView();
     else if (view === 'lagerorte') loadLagerorteView();
@@ -505,7 +505,10 @@ async function loadBuchungen() {
         }
     } catch {}
 }
-function openBuchenFormular() { document.getElementById('buchenFormular').classList.remove('hidden'); }
+function openBuchenFormular() {
+    populateSelect('buchenArtikelId', artikelCache, 'name', 'id');
+    document.getElementById('buchenFormular').classList.remove('hidden');
+}
 function cancelBuchenForm() { document.getElementById('buchenFormular').classList.add('hidden'); }
 async function doBuchung() {
     const body = { artikel_id: document.getElementById('buchenArtikelId').value, typ: document.getElementById('buchenTyp').value, menge: parseFloat(document.getElementById('buchenMenge').value), grund: document.getElementById('buchenGrund').value.trim() };
@@ -516,7 +519,6 @@ async function doBuchung() {
 }
 
 // Inventur
-async function loadInventurArtikel() { populateSelect('inventurArtikelId', artikelCache, 'name', 'id'); }
 async function doInventur() {
     const body = { artikel_id: document.getElementById('inventurArtikelId').value, lagerort_id: document.getElementById('inventurLagerort').value || 1, neue_menge: parseFloat(document.getElementById('inventurNeueMenge').value) };
     const r = await apiCall('/inventur', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
@@ -567,7 +569,10 @@ async function deleteLagerort(id) { if (confirm('Löschen?')) { await apiCall('/
 async function loadMhdChargen() { try { const r = await apiCall('/mhd'); if (r.ok) renderMhd(await r.json()); } catch {} }
 async function loadMhdFaellig(tage) { try { const r = await apiCall('/mhd/faellig?tage='+tage); if (r.ok) renderMhd(await r.json()); } catch {} }
 function renderMhd(data) { document.getElementById('mhdTabelle').innerHTML = data.length ? '<table><tr><th>Artikel</th><th>Charge</th><th>Menge</th><th>Ablauf</th><th></th></tr>' + data.map(m => `<tr><td>${m.artikel_name}</td><td>${m.charge||''}</td><td>${m.menge}</td><td>${m.ablaufdatum}</td><td><button class="btn btn-danger" onclick="deleteMhdCharge(${m.id})">🗑️</button></td></tr>`).join('') + '</table>' : '<p>Keine MHD-Chargen.</p>'; }
-function openMhdFormular() { document.getElementById('mhdFormular').classList.remove('hidden'); }
+function openMhdFormular() {
+    populateSelect('mhdArtikelId', artikelCache, 'name', 'id');
+    document.getElementById('mhdFormular').classList.remove('hidden');
+}
 function cancelMhdForm() { document.getElementById('mhdFormular').classList.add('hidden'); }
 async function saveMhdCharge() {
     const body = { artikel_id: document.getElementById('mhdArtikelId').value, charge: document.getElementById('mhdCharge').value.trim(), menge: parseFloat(document.getElementById('mhdMenge').value), ablaufdatum: document.getElementById('mhdAblaufdatum').value };
