@@ -123,6 +123,11 @@
         .kritisch-btn:hover { background: rgba(255,138,128,0.15); }
         .kritisch-btn.aktiv { background: #e53935; color: white; }
         body.dark-mode .kritisch-btn.aktiv { background: #ff8a80; color: #1e1e2f; }
+        .inventur-tabelle td, .inventur-tabelle th { padding: 8px; }
+        .inventur-tabelle input[type="number"] { width: 80px; }
+        .analyse-box { background: rgba(248,249,255,0.8); padding: 20px; border-radius: 16px; margin-top: 20px; }
+        body.dark-mode .analyse-box { background: rgba(60,60,90,0.7); }
+        .selected-row { background: rgba(102,126,234,0.1); }
     </style>
 </head>
 <body>
@@ -250,15 +255,27 @@
             </div>
         </div>
 
-        <!-- Inventur -->
+        <!-- Inventur NEU -->
         <div id="viewInventur" class="hidden">
-            <h2>Inventur</h2>
-            <div id="inventurFormular" style="background:rgba(248,249,255,0.8); padding:24px; border-radius:20px; margin-top:20px;">
-                <select id="inventurArtikelId"><option value="">Artikel wählen</option></select>
-                <select id="inventurLagerort"><option value="">Lagerort wählen</option></select>
-                <input type="number" id="inventurNeueMenge" placeholder="Neue Menge" min="0">
-                <button class="btn btn-primary" onclick="doInventur()">Inventur durchführen</button>
-                <div id="inventurStatus" style="margin-top:8px; font-size:13px;"></div>
+            <h2>📦 Inventur-Modus</h2>
+            <div class="row" style="margin-bottom:20px;">
+                <select id="inventurArtikelSelect" onchange="inventurLaden()"><option value="">Artikel wählen</option></select>
+                <input type="date" id="inventurStartDatum" onchange="inventurLaden()">
+                <input type="date" id="inventurEndDatum" onchange="inventurLaden()">
+                <input type="number" id="inventurToleranz" value="10" min="0" max="100" step="1" style="width:80px;" placeholder="Toleranz %">
+            </div>
+
+            <div id="inventurTabelleContainer"></div>
+
+            <div id="inventurAnalyseBox" class="analyse-box hidden">
+                <h4>Berechnung Soll-Bestand</h4>
+                <div id="inventurAnalyseInhalt"></div>
+            </div>
+
+            <div class="row" style="margin-top:20px;">
+                <button class="btn btn-primary" onclick="inventurAlleSpeichern()">💾 Alle Korrekturen speichern</button>
+                <button class="btn" onclick="inventurAllesAufNull()">🗑️ Alles auf 0 setzen</button>
+                <button class="btn" onclick="inventurNaechsterArtikel()">⏭ Nächster Artikel</button>
             </div>
         </div>
 
@@ -333,6 +350,8 @@
 const API = 'https://warenwirtschaft-klon-api.elber3763.workers.dev/api';
 let userRolle = 'user', activeView = 'dashboard', kritischerFilterAktiv = false;
 let lieferantenCache = [], lagerorteCache = [], artikelCache = [], bestellvorschlagCache = [];
+let inventurDetails = null;
+let selectedInventurRow = null;
 
 async function apiCall(url, options = {}) {
     const token = localStorage.getItem('token');
@@ -390,8 +409,10 @@ function switchView(view) {
     else if (view === 'artikel') { zeigeArtikelTabelle(); }
     else if (view === 'buchungen') loadBuchungen();
     else if (view === 'inventur') {
-        populateSelect('inventurArtikelId', artikelCache, 'name', 'id');
-        populateSelect('inventurLagerort', lagerorteCache, 'name', 'id');
+        populateSelect('inventurArtikelSelect', artikelCache, 'name', 'id');
+        document.getElementById('inventurStartDatum').valueAsDate = new Date(new Date().setDate(new Date().getDate()-30));
+        document.getElementById('inventurEndDatum').valueAsDate = new Date();
+        inventurLaden();
     }
     else if (view === 'analyse') loadAnalyse('renner');
     else if (view === 'lieferanten') loadLieferantenView();
@@ -506,7 +527,7 @@ async function importCSV(e) {
     e.target.value = '';
 }
 
-// Buchungen – Helper für Buchungstyp-Änderung
+// Buchungen
 function updateBuchungsTyp() {
     const typ = document.getElementById('buchenTyp').value;
     const zielSelect = document.getElementById('buchenZielLagerort');
@@ -518,7 +539,6 @@ function updateBuchungsTyp() {
         zielSelect.value = '';
     }
 }
-
 async function loadBuchungen() {
     try {
         const r = await apiCall('/buchungen');
@@ -545,28 +565,158 @@ async function doBuchung() {
         menge: parseFloat(document.getElementById('buchenMenge').value),
         grund: document.getElementById('buchenGrund').value.trim()
     };
-
     if (typ === 'umlagerung') {
         body.ziel_lagerort_id = document.getElementById('buchenZielLagerort').value;
         if (!body.ziel_lagerort_id) return alert('Bitte Ziel-Lagerort für die Umlagerung wählen.');
     }
-
     if (!body.artikel_id || !body.menge) return alert('Artikel und Menge erforderlich');
     const r = await apiCall('/buchungen', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
     if (r.ok) { cancelBuchenForm(); loadBuchungen(); loadArtikelCache(); loadArtikel(); }
     else { alert(await r.text()); }
 }
 
-// Inventur
-async function doInventur() {
-    const body = {
-        artikel_id: document.getElementById('inventurArtikelId').value,
-        lagerort_id: document.getElementById('inventurLagerort').value || 1,
-        neue_menge: parseFloat(document.getElementById('inventurNeueMenge').value)
-    };
-    const r = await apiCall('/inventur', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-    if (r.ok) { document.getElementById('inventurStatus').textContent = '✅ Inventur erfolgreich.'; loadArtikelCache(); }
-    else { document.getElementById('inventurStatus').textContent = '❌ Fehler: ' + (await r.text()); }
+// Inventur (NEU)
+async function inventurLaden() {
+    const artikelId = document.getElementById('inventurArtikelSelect').value;
+    const start = document.getElementById('inventurStartDatum').value;
+    const end = document.getElementById('inventurEndDatum').value || new Date().toISOString().slice(0,10);
+    if (!artikelId || !start) { document.getElementById('inventurTabelleContainer').innerHTML = ''; return; }
+
+    const resp = await apiCall(`/inventur/details?artikel_id=${artikelId}&start=${start}&end=${end}`);
+    if (!resp.ok) { alert('Fehler beim Laden der Inventurdaten'); return; }
+    const data = await resp.json();
+    inventurDetails = data;
+    renderInventurTabelle(data.lagerorte);
+    document.getElementById('inventurAnalyseBox').classList.remove('hidden');
+    inventurAnalyseAktualisieren(null);
+}
+
+function renderInventurTabelle(lagerorte) {
+    const toleranz = parseFloat(document.getElementById('inventurToleranz').value) || 10;
+    let html = '<table class="inventur-tabelle"><thead><tr><th>Lagerort</th><th>Soll</th><th>Ist (Eingabe)</th><th>Status</th><th>Ursache</th></tr></thead><tbody>';
+    lagerorte.forEach((lo, idx) => {
+        html += `<tr id="inventurRow${idx}" onclick="inventurZeileMarkieren(${idx})">
+            <td>${lo.lagerort_name}</td>
+            <td>${lo.soll} ${inventurDetails.artikel.einheit || ''}</td>
+            <td><input type="number" id="inventurIst${idx}" value="${lo.soll}" step="any" onchange="inventurStatusAktualisieren(${idx})"></td>
+            <td id="inventurStatus${idx}">OK</td>
+            <td><select id="inventurUrsache${idx}"><option value="OK">OK</option><option value="Prüfen">Prüfen</option></select></td>
+        </tr>`;
+    });
+    html += '</tbody></table>';
+    document.getElementById('inventurTabelleContainer').innerHTML = html;
+    lagerorte.forEach((lo, idx) => inventurStatusAktualisieren(idx));
+    selectedInventurRow = -1;
+}
+
+function inventurZeileMarkieren(idx) {
+    document.querySelectorAll('.inventur-tabelle tr').forEach(r => r.classList.remove('selected-row'));
+    const row = document.getElementById('inventurRow'+idx);
+    if (row) row.classList.add('selected-row');
+    selectedInventurRow = idx;
+    inventurAnalyseAktualisieren(idx);
+}
+
+function inventurStatusAktualisieren(idx) {
+    if (!inventurDetails) return;
+    const lo = inventurDetails.lagerorte[idx];
+    const istInput = document.getElementById('inventurIst'+idx);
+    const ist = parseFloat(istInput.value) || 0;
+    const soll = lo.soll;
+    const toleranz = parseFloat(document.getElementById('inventurToleranz').value) || 10;
+    const diff = Math.abs(soll - ist);
+    const maxDiff = (soll * toleranz) / 100;
+    const statusZelle = document.getElementById('inventurStatus'+idx);
+    if (diff <= maxDiff || soll === 0) {
+        statusZelle.textContent = 'OK';
+        statusZelle.style.color = '#2e7d32';
+    } else {
+        statusZelle.textContent = 'Differenz';
+        statusZelle.style.color = '#e53935';
+    }
+}
+
+async function inventurAnalyseAktualisieren(idx) {
+    if (idx === null || idx === undefined || !inventurDetails) {
+        document.getElementById('inventurAnalyseInhalt').innerHTML = '<p>Keine Zeile ausgewählt.</p>';
+        return;
+    }
+    const lo = inventurDetails.lagerorte[idx];
+    const istInput = document.getElementById('inventurIst'+idx);
+    const ist = parseFloat(istInput.value) || 0;
+    const soll = lo.soll;
+    const diff = soll - ist;
+    const toleranz = parseFloat(document.getElementById('inventurToleranz').value) || 10;
+    const maxDiff = (soll * toleranz) / 100;
+    const status = (Math.abs(diff) <= maxDiff || soll === 0) ? 'OK' : 'Abweichung';
+
+    document.getElementById('inventurAnalyseInhalt').innerHTML = `
+        <p><strong>Lagerort:</strong> ${lo.lagerort_name}</p>
+        <p><strong>Startbestand:</strong> ${lo.startBestand} ${inventurDetails.artikel.einheit || ''}</p>
+        <p><strong>Zugänge / Einkauf:</strong> +${lo.zugangSum} ${inventurDetails.artikel.einheit || ''}</p>
+        <p><strong>Abgänge / Umlagerungen:</strong> -${lo.abgangSum} ${inventurDetails.artikel.einheit || ''} (davon Verluste: ${lo.verlustSum})</p>
+        <p><strong>Erwarteter SOLL-Bestand:</strong> ${lo.erwarteterSoll} ${inventurDetails.artikel.einheit || ''}</p>
+        <p><strong>Gezählter IST-Bestand:</strong> ${ist} ${inventurDetails.artikel.einheit || ''}</p>
+        <p><strong>Differenz (Soll - Ist):</strong> ${diff}</p>
+        <p><strong>Fehler-Toleranz:</strong> ${toleranz} %</p>
+        <p><strong>Status:</strong> <span style="color:${status==='OK'?'#2e7d32':'#e53935'}">${status}</span></p>
+        ${diff !== 0 ? `<p><button class="btn btn-primary" onclick="inventurEinzelKorrektur(${idx})">✅ Als 'Korrektur' übernehmen (${idx})</button></p>` : ''}
+    `;
+}
+
+async function inventurEinzelKorrektur(idx) {
+    if (!inventurDetails) return;
+    const lo = inventurDetails.lagerorte[idx];
+    const ist = parseFloat(document.getElementById('inventurIst'+idx).value) || 0;
+    if (ist === lo.soll) return;
+    const body = { korrekturen: [{ artikel_id: inventurDetails.artikel.id, lagerort_id: lo.lagerort_id, neue_menge: ist }] };
+    const r = await apiCall('/inventur/batch', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    if (r.ok) {
+        alert('Korrektur gespeichert.');
+        inventurLaden();
+    } else {
+        alert('Fehler beim Speichern: ' + (await r.text()));
+    }
+}
+
+async function inventurAlleSpeichern() {
+    if (!inventurDetails) return;
+    const korrekturen = [];
+    inventurDetails.lagerorte.forEach((lo, idx) => {
+        const ist = parseFloat(document.getElementById('inventurIst'+idx).value) || 0;
+        if (ist !== lo.soll) {
+            korrekturen.push({ artikel_id: inventurDetails.artikel.id, lagerort_id: lo.lagerort_id, neue_menge: ist });
+        }
+    });
+    if (korrekturen.length === 0) { alert('Keine Änderungen vorgenommen.'); return; }
+    const r = await apiCall('/inventur/batch', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ korrekturen }) });
+    if (r.ok) {
+        alert('Alle Korrekturen gespeichert.');
+        inventurLaden();
+        loadArtikelCache();
+    } else {
+        alert('Fehler: ' + (await r.text()));
+    }
+}
+
+function inventurAllesAufNull() {
+    if (!inventurDetails) return;
+    inventurDetails.lagerorte.forEach((lo, idx) => {
+        document.getElementById('inventurIst'+idx).value = 0;
+        inventurStatusAktualisieren(idx);
+    });
+    alert('Alle Ist-Werte auf 0 gesetzt.');
+}
+
+function inventurNaechsterArtikel() {
+    const select = document.getElementById('inventurArtikelSelect');
+    const currentIndex = select.selectedIndex;
+    if (currentIndex < select.options.length - 1) {
+        select.selectedIndex = currentIndex + 1;
+        inventurLaden();
+    } else {
+        alert('Das war der letzte Artikel.');
+    }
 }
 
 // Analyse
