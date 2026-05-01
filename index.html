@@ -232,6 +232,7 @@
             <div id="buchenFormular" class="hidden" style="background:rgba(248,249,255,0.8); padding:24px; border-radius:20px; margin-top:20px;">
                 <h3>Wareneingang / -ausgang buchen</h3>
                 <select id="buchenArtikelId"><option value="">Artikel wählen</option></select>
+                <select id="buchenLagerort"><option value="">Lagerort wählen</option></select>
                 <select id="buchenTyp"><option value="eingang">Wareneingang (+)</option><option value="ausgang">Warenausgang (−)</option></select>
                 <input type="number" id="buchenMenge" placeholder="Menge" min="1">
                 <input type="text" id="buchenGrund" placeholder="Grund (optional)">
@@ -244,7 +245,7 @@
             <h2>Inventur</h2>
             <div id="inventurFormular" style="background:rgba(248,249,255,0.8); padding:24px; border-radius:20px; margin-top:20px;">
                 <select id="inventurArtikelId"><option value="">Artikel wählen</option></select>
-                <select id="inventurLagerort"><option value="1">Hauptlager</option></select>
+                <select id="inventurLagerort"><option value="">Lagerort wählen</option></select>
                 <input type="number" id="inventurNeueMenge" placeholder="Neue Menge" min="0">
                 <button class="btn btn-primary" onclick="doInventur()">Inventur durchführen</button>
                 <div id="inventurStatus" style="margin-top:8px; font-size:13px;"></div>
@@ -378,7 +379,10 @@ function switchView(view) {
     if (view === 'dashboard') loadDashboard();
     else if (view === 'artikel') { zeigeArtikelTabelle(); }
     else if (view === 'buchungen') loadBuchungen();
-    else if (view === 'inventur') { populateSelect('inventurArtikelId', artikelCache, 'name', 'id'); }
+    else if (view === 'inventur') {
+        populateSelect('inventurArtikelId', artikelCache, 'name', 'id');
+        populateSelect('inventurLagerort', lagerorteCache, 'name', 'id');
+    }
     else if (view === 'analyse') loadAnalyse('renner');
     else if (view === 'lieferanten') loadLieferantenView();
     else if (view === 'lagerorte') loadLagerorteView();
@@ -464,10 +468,7 @@ function toggleKritischerFilter() {
 
 // Bestellvorschlag
 async function ladeBestellvorschlag() {
-    try {
-        const r = await apiCall('/artikel/bestellvorschlag');
-        if (r.ok) { bestellvorschlagCache = await r.json(); zeigeBestellvorschlag(); }
-    } catch {}
+    try { const r = await apiCall('/artikel/bestellvorschlag'); if (r.ok) { bestellvorschlagCache = await r.json(); zeigeBestellvorschlag(); } } catch {}
 }
 function zeigeBestellvorschlag() {
     document.getElementById('artikelTabelle').classList.add('hidden');
@@ -495,34 +496,46 @@ async function importCSV(e) {
     e.target.value = '';
 }
 
-// Buchungen
+// Buchungen (mit Lagerort)
 async function loadBuchungen() {
     try {
         const r = await apiCall('/buchungen');
         if (r.ok) {
             const data = await r.json();
-            document.getElementById('buchungenTabelle').innerHTML = data.length ? '<table><tr><th>Zeitpunkt</th><th>Artikel</th><th>Typ</th><th>Menge</th><th>Grund</th><th>Benutzer</th></tr>' + data.map(b => `<tr><td>${new Date(b.zeitpunkt).toLocaleString('de-DE')}</td><td>${b.artikel_name}</td><td>${b.typ}</td><td>${b.menge}</td><td>${b.grund||''}</td><td>${b.user_email}</td></tr>`).join('') + '</table>' : '<p>Keine Buchungen.</p>';
+            document.getElementById('buchungenTabelle').innerHTML = data.length ? '<table><tr><th>Zeitpunkt</th><th>Artikel</th><th>Typ</th><th>Menge</th><th>Grund</th><th>Benutzer</th><th>Lagerort</th></tr>' + data.map(b => `<tr><td>${new Date(b.zeitpunkt).toLocaleString('de-DE')}</td><td>${b.artikel_name}</td><td>${b.typ}</td><td>${b.menge}</td><td>${b.grund||''}</td><td>${b.user_email}</td><td>${b.lagerort_name||'–'}</td></tr>`).join('') + '</table>' : '<p>Keine Buchungen.</p>';
         }
     } catch {}
 }
 function openBuchenFormular() {
     populateSelect('buchenArtikelId', artikelCache, 'name', 'id');
+    populateSelect('buchenLagerort', lagerorteCache, 'name', 'id');
     document.getElementById('buchenFormular').classList.remove('hidden');
 }
 function cancelBuchenForm() { document.getElementById('buchenFormular').classList.add('hidden'); }
 async function doBuchung() {
-    const body = { artikel_id: document.getElementById('buchenArtikelId').value, typ: document.getElementById('buchenTyp').value, menge: parseFloat(document.getElementById('buchenMenge').value), grund: document.getElementById('buchenGrund').value.trim() };
+    const body = {
+        artikel_id: document.getElementById('buchenArtikelId').value,
+        lagerort_id: document.getElementById('buchenLagerort').value || 1,
+        typ: document.getElementById('buchenTyp').value,
+        menge: parseFloat(document.getElementById('buchenMenge').value),
+        grund: document.getElementById('buchenGrund').value.trim()
+    };
     if (!body.artikel_id || !body.menge) return alert('Artikel und Menge erforderlich');
     const r = await apiCall('/buchungen', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
     if (r.ok) { cancelBuchenForm(); loadBuchungen(); loadArtikelCache(); loadArtikel(); }
     else { alert(await r.text()); }
 }
 
-// Inventur
+// Inventur (mit dynamischem Lagerort)
 async function doInventur() {
-    const body = { artikel_id: document.getElementById('inventurArtikelId').value, lagerort_id: document.getElementById('inventurLagerort').value || 1, neue_menge: parseFloat(document.getElementById('inventurNeueMenge').value) };
+    const body = {
+        artikel_id: document.getElementById('inventurArtikelId').value,
+        lagerort_id: document.getElementById('inventurLagerort').value || 1,
+        neue_menge: parseFloat(document.getElementById('inventurNeueMenge').value)
+    };
     const r = await apiCall('/inventur', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
     if (r.ok) { document.getElementById('inventurStatus').textContent = '✅ Inventur erfolgreich.'; loadArtikelCache(); }
+    else { document.getElementById('inventurStatus').textContent = '❌ Fehler: ' + (await r.text()); }
 }
 
 // Analyse
@@ -569,10 +582,7 @@ async function deleteLagerort(id) { if (confirm('Löschen?')) { await apiCall('/
 async function loadMhdChargen() { try { const r = await apiCall('/mhd'); if (r.ok) renderMhd(await r.json()); } catch {} }
 async function loadMhdFaellig(tage) { try { const r = await apiCall('/mhd/faellig?tage='+tage); if (r.ok) renderMhd(await r.json()); } catch {} }
 function renderMhd(data) { document.getElementById('mhdTabelle').innerHTML = data.length ? '<table><tr><th>Artikel</th><th>Charge</th><th>Menge</th><th>Ablauf</th><th></th></tr>' + data.map(m => `<tr><td>${m.artikel_name}</td><td>${m.charge||''}</td><td>${m.menge}</td><td>${m.ablaufdatum}</td><td><button class="btn btn-danger" onclick="deleteMhdCharge(${m.id})">🗑️</button></td></tr>`).join('') + '</table>' : '<p>Keine MHD-Chargen.</p>'; }
-function openMhdFormular() {
-    populateSelect('mhdArtikelId', artikelCache, 'name', 'id');
-    document.getElementById('mhdFormular').classList.remove('hidden');
-}
+function openMhdFormular() { populateSelect('mhdArtikelId', artikelCache, 'name', 'id'); document.getElementById('mhdFormular').classList.remove('hidden'); }
 function cancelMhdForm() { document.getElementById('mhdFormular').classList.add('hidden'); }
 async function saveMhdCharge() {
     const body = { artikel_id: document.getElementById('mhdArtikelId').value, charge: document.getElementById('mhdCharge').value.trim(), menge: parseFloat(document.getElementById('mhdMenge').value), ablaufdatum: document.getElementById('mhdAblaufdatum').value };
@@ -584,10 +594,7 @@ async function deleteMhdCharge(id) { if (confirm('Löschen?')) { await apiCall('
 
 // Team
 async function loadTeam() {
-    try {
-        const r = await apiCall('/team');
-        if (r.ok) document.getElementById('teamTabelle').innerHTML = '<table><tr><th>E-Mail</th><th>Rolle</th></tr>' + (await r.json()).map(m => `<tr><td>${m.email}</td><td>${m.rolle}</td></tr>`).join('') + '</table>';
-    } catch {}
+    try { const r = await apiCall('/team'); if (r.ok) document.getElementById('teamTabelle').innerHTML = '<table><tr><th>E-Mail</th><th>Rolle</th></tr>' + (await r.json()).map(m => `<tr><td>${m.email}</td><td>${m.rolle}</td></tr>`).join('') + '</table>'; } catch {}
 }
 function toggleEinladen() { document.getElementById('einladenFormular').classList.toggle('hidden'); }
 async function einladen() {
