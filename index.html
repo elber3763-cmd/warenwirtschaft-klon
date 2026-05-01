@@ -410,8 +410,12 @@ function switchView(view) {
     else if (view === 'buchungen') loadBuchungen();
     else if (view === 'inventur') {
         populateSelect('inventurArtikelSelect', artikelCache, 'name', 'id');
-        document.getElementById('inventurStartDatum').valueAsDate = new Date(new Date().setDate(new Date().getDate()-30));
-        document.getElementById('inventurEndDatum').valueAsDate = new Date();
+        // Setze Start-Datum auf vor 30 Tagen, End-Datum auf heute
+        const heute = new Date();
+        const vor30Tagen = new Date();
+        vor30Tagen.setDate(heute.getDate() - 30);
+        document.getElementById('inventurStartDatum').value = vor30Tagen.toISOString().slice(0,10);
+        document.getElementById('inventurEndDatum').value = heute.toISOString().slice(0,10);
         inventurLaden();
     }
     else if (view === 'analyse') loadAnalyse('renner');
@@ -575,15 +579,23 @@ async function doBuchung() {
     else { alert(await r.text()); }
 }
 
-// Inventur (NEU)
+// Inventur (NEU, komplett überarbeitet)
 async function inventurLaden() {
     const artikelId = document.getElementById('inventurArtikelSelect').value;
     const start = document.getElementById('inventurStartDatum').value;
     const end = document.getElementById('inventurEndDatum').value || new Date().toISOString().slice(0,10);
-    if (!artikelId || !start) { document.getElementById('inventurTabelleContainer').innerHTML = ''; return; }
+    if (!artikelId || !start) { 
+        document.getElementById('inventurTabelleContainer').innerHTML = '<p>Bitte einen Artikel und Startdatum auswählen.</p>';
+        document.getElementById('inventurAnalyseBox').classList.add('hidden');
+        return; 
+    }
 
     const resp = await apiCall(`/inventur/details?artikel_id=${artikelId}&start=${start}&end=${end}`);
-    if (!resp.ok) { alert('Fehler beim Laden der Inventurdaten'); return; }
+    if (!resp.ok) { 
+        document.getElementById('inventurTabelleContainer').innerHTML = '<p>Fehler beim Laden der Inventurdaten.</p>';
+        document.getElementById('inventurAnalyseBox').classList.add('hidden');
+        return; 
+    }
     const data = await resp.json();
     inventurDetails = data;
     renderInventurTabelle(data.lagerorte);
@@ -592,7 +604,6 @@ async function inventurLaden() {
 }
 
 function renderInventurTabelle(lagerorte) {
-    const toleranz = parseFloat(document.getElementById('inventurToleranz').value) || 10;
     let html = '<table class="inventur-tabelle"><thead><tr><th>Lagerort</th><th>Soll</th><th>Ist (Eingabe)</th><th>Status</th><th>Ursache</th></tr></thead><tbody>';
     lagerorte.forEach((lo, idx) => {
         html += `<tr id="inventurRow${idx}" onclick="inventurZeileMarkieren(${idx})">
