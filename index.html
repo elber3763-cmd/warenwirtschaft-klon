@@ -233,7 +233,21 @@
                 <h3>Wareneingang / -ausgang buchen</h3>
                 <select id="buchenArtikelId"><option value="">Artikel wählen</option></select>
                 <select id="buchenLagerort"><option value="">Lagerort wählen</option></select>
-                <select id="buchenTyp"><option value="eingang">Wareneingang (+)</option><option value="ausgang">Warenausgang (−)</option></select>
+
+             <select id="buchenTyp">
+              <option value="eingang">Wareneingang (+)</option>
+              <option value="ausgang">Warenausgang (−)</option>
+              <option value="verlust">Verlust / Diebstahl (−)</option>
+              <option value="bruch">Bruch / Verderb (−)</option>
+              <option value="umlagerung">Umlagerung</option>
+              <option value="retoure">Retoure (−)</option>
+              <option value="eigenverbrauch">Eigenverbrauch (−)</option>
+              <option value="gutschein">Gutschein (−)</option>
+            </select>
+                
+
+
+                
                 <input type="number" id="buchenMenge" placeholder="Menge" min="1">
                 <input type="text" id="buchenGrund" placeholder="Grund (optional)">
                 <div class="row"><button class="btn btn-primary" onclick="doBuchung()">Buchen</button><button class="btn" onclick="cancelBuchenForm()">Abbrechen</button></div>
