@@ -233,21 +233,17 @@
                 <h3>Wareneingang / -ausgang buchen</h3>
                 <select id="buchenArtikelId"><option value="">Artikel wählen</option></select>
                 <select id="buchenLagerort"><option value="">Lagerort wählen</option></select>
-
-             <select id="buchenTyp">
-              <option value="eingang">Wareneingang (+)</option>
-              <option value="ausgang">Warenausgang (−)</option>
-              <option value="verlust">Verlust / Diebstahl (−)</option>
-              <option value="bruch">Bruch / Verderb (−)</option>
-              <option value="umlagerung">Umlagerung</option>
-              <option value="retoure">Retoure (−)</option>
-              <option value="eigenverbrauch">Eigenverbrauch (−)</option>
-              <option value="gutschein">Gutschein (−)</option>
-            </select>
-                
-
-
-                
+                <select id="buchenZielLagerort" class="hidden"><option value="">Ziel-Lagerort (für Umlagerung)</option></select>
+                <select id="buchenTyp" onchange="updateBuchungsTyp()">
+                    <option value="eingang">Wareneingang (+)</option>
+                    <option value="ausgang">Warenausgang (−)</option>
+                    <option value="verlust">Verlust / Diebstahl (−)</option>
+                    <option value="bruch">Bruch / Verderb (−)</option>
+                    <option value="umlagerung">Umlagerung</option>
+                    <option value="retoure">Retoure (−)</option>
+                    <option value="eigenverbrauch">Eigenverbrauch (−)</option>
+                    <option value="gutschein">Gutschein (−)</option>
+                </select>
                 <input type="number" id="buchenMenge" placeholder="Menge" min="1">
                 <input type="text" id="buchenGrund" placeholder="Grund (optional)">
                 <div class="row"><button class="btn btn-primary" onclick="doBuchung()">Buchen</button><button class="btn" onclick="cancelBuchenForm()">Abbrechen</button></div>
@@ -510,7 +506,19 @@ async function importCSV(e) {
     e.target.value = '';
 }
 
-// Buchungen (mit Lagerort)
+// Buchungen – Helper für Buchungstyp-Änderung
+function updateBuchungsTyp() {
+    const typ = document.getElementById('buchenTyp').value;
+    const zielSelect = document.getElementById('buchenZielLagerort');
+    if (typ === 'umlagerung') {
+        zielSelect.classList.remove('hidden');
+        populateSelect('buchenZielLagerort', lagerorteCache, 'name', 'id');
+    } else {
+        zielSelect.classList.add('hidden');
+        zielSelect.value = '';
+    }
+}
+
 async function loadBuchungen() {
     try {
         const r = await apiCall('/buchungen');
@@ -523,24 +531,33 @@ async function loadBuchungen() {
 function openBuchenFormular() {
     populateSelect('buchenArtikelId', artikelCache, 'name', 'id');
     populateSelect('buchenLagerort', lagerorteCache, 'name', 'id');
+    document.getElementById('buchenZielLagerort').classList.add('hidden');
+    document.getElementById('buchenZielLagerort').value = '';
     document.getElementById('buchenFormular').classList.remove('hidden');
 }
 function cancelBuchenForm() { document.getElementById('buchenFormular').classList.add('hidden'); }
 async function doBuchung() {
+    const typ = document.getElementById('buchenTyp').value;
     const body = {
         artikel_id: document.getElementById('buchenArtikelId').value,
         lagerort_id: document.getElementById('buchenLagerort').value || 1,
-        typ: document.getElementById('buchenTyp').value,
+        typ: typ,
         menge: parseFloat(document.getElementById('buchenMenge').value),
         grund: document.getElementById('buchenGrund').value.trim()
     };
+
+    if (typ === 'umlagerung') {
+        body.ziel_lagerort_id = document.getElementById('buchenZielLagerort').value;
+        if (!body.ziel_lagerort_id) return alert('Bitte Ziel-Lagerort für die Umlagerung wählen.');
+    }
+
     if (!body.artikel_id || !body.menge) return alert('Artikel und Menge erforderlich');
     const r = await apiCall('/buchungen', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
     if (r.ok) { cancelBuchenForm(); loadBuchungen(); loadArtikelCache(); loadArtikel(); }
     else { alert(await r.text()); }
 }
 
-// Inventur (mit dynamischem Lagerort)
+// Inventur
 async function doInventur() {
     const body = {
         artikel_id: document.getElementById('inventurArtikelId').value,
